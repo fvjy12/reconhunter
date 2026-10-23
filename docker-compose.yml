@@ -1,0 +1,8 @@
+services:
+  # Учебно-уязвимая лаборатория: единственная цель, которую легально сканировать
+  juice-shop:
+    image: bkimminich/juice-shop:latest
+    container_name: reconhunter-lab
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
