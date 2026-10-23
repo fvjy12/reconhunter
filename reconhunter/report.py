@@ -1,8 +1,9 @@
-"""Генерация отчётов: Markdown и standalone HTML."""
+"""Генерация отчётов: Markdown, HTML и JSON."""
 
 from __future__ import annotations
 
 import html
+import json
 from datetime import datetime
 
 from . import __version__
@@ -27,8 +28,29 @@ def _sorted(findings: list[Finding]) -> list[Finding]:
     return sorted(findings, key=lambda f: -SEVERITY_ORDER.get(f.severity, 0))
 
 
+def json_report(target_str: str, findings: list[Finding],
+                tech: list[str], open_ports: list[str], subs: list[str] | None = None) -> str:
+    """Машинно-читаемый отчёт для пайплайнов и дальнейшей обработки."""
+    return json.dumps({
+        "tool": "ReconHunter",
+        "version": __version__,
+        "target": target_str,
+        "date": datetime.now().isoformat(timespec="seconds"),
+        "summary": _summary(findings),
+        "open_ports": open_ports,
+        "subdomains": subs or [],
+        "technologies": tech,
+        "findings": [
+            {"severity": f.severity, "module": f.module,
+             "title": f.title, "detail": f.detail}
+            for f in _sorted(findings)
+        ],
+    }, ensure_ascii=False, indent=2)
+
+
 def markdown_report(target_str: str, findings: list[Finding],
-                    tech: list[str], open_ports: list[str]) -> str:
+                    tech: list[str], open_ports: list[str],
+                    subs: list[str] | None = None) -> str:
     counts = _summary(findings)
     lines = [
         "# ReconHunter — отчёт по сканированию",
@@ -46,6 +68,8 @@ def markdown_report(target_str: str, findings: list[Finding],
     ]
     if open_ports:
         lines += ["## Открытые порты", ""] + [f"- {p}" for p in open_ports] + [""]
+    if subs:
+        lines += ["## Субдомены", ""] + [f"- {s}" for s in subs] + [""]
     if tech:
         lines += ["## Технологии", ""] + [f"- {t}" for t in tech] + [""]
     lines += ["## Находки", ""]
@@ -59,7 +83,8 @@ def markdown_report(target_str: str, findings: list[Finding],
 
 
 def html_report(target_str: str, findings: list[Finding],
-                tech: list[str], open_ports: list[str]) -> str:
+                tech: list[str], open_ports: list[str],
+                subs: list[str] | None = None) -> str:
     counts = _summary(findings)
 
     def badge(sev: str) -> str:
@@ -81,6 +106,7 @@ def html_report(target_str: str, findings: list[Finding],
     )
     ports_html = "".join(f"<li><code>{html.escape(p)}</code></li>" for p in open_ports)
     tech_html = "".join(f"<li>{html.escape(t)}</li>" for t in tech)
+    subs_html = "".join(f"<li><code>{html.escape(s)}</code></li>" for s in (subs or []))
 
     return f"""<!DOCTYPE html>
 <html lang="ru"><head><meta charset="utf-8">
@@ -104,6 +130,7 @@ def html_report(target_str: str, findings: list[Finding],
    Дата: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} · v{__version__}</p>
 <div class="cards">{cards}</div>
 {('<h2>Открытые порты</h2><ul>' + ports_html + '</ul>') if open_ports else ''}
+{('<h2>Субдомены</h2><ul>' + subs_html + '</ul>') if subs else ''}
 {('<h2>Технологии</h2><ul>' + tech_html + '</ul>') if tech else ''}
 <h2>Находки</h2>
 <table><tr><th>Серьёзность</th><th>Находка</th><th>Модуль</th></tr>{rows}</table>

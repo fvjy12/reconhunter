@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
@@ -83,6 +84,15 @@ WEB_PORTS = {
     8081, 8088, 8090, 8180, 8222, 8443, 8500, 8848, 9080, 9090, 9092, 9999,
     10000,
 }
+
+
+def is_domain(host: str) -> bool:
+    """True для DNS-имён (example.com), False для IP и localhost."""
+    try:
+        ipaddress.ip_address(host)
+        return False
+    except ValueError:
+        return host not in ("localhost",) and "." in host
 
 
 def parse_ports(spec: str) -> list[int]:

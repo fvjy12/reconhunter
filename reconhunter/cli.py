@@ -21,13 +21,16 @@ from .core import (
     SEVERITY_COLORS,
     Target,
     WEB_PORTS,
+    is_domain,
     parse_ports,
     parse_target,
 )
 from .fingerprint import fingerprint
 from .headers_check import check_headers
 from .portscan import scan_ports
-from .report import html_report, markdown_report
+from .report import html_report, json_report, markdown_report
+from .subdomains import enum_subdomains
+from .tls_check import check_tls
 from .webscan import findings_from_web, scan_web
 
 BANNER = r"""
@@ -56,10 +59,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="свой словарь директорий (по умолчанию wordlists/common.txt)")
     parser.add_argument("--timeout", type=float, default=2.0, help="таймаут соединения, сек")
     parser.add_argument("--concurrency", type=int, default=400, help="параллельных соединений")
+    parser.add_argument("--subs", action="store_true",
+                        help="перебор субдоменов по словарю (DNS, только для доменов)")
     parser.add_argument("--no-ports", action="store_true", help="не сканировать порты")
     parser.add_argument("--no-web", action="store_true", help="не запускать веб-модули")
-    parser.add_argument("--format", choices=["md", "html", "both"], default="both",
-                        help="формат отчёта")
+    parser.add_argument("--format", choices=["md", "html", "json", "both"], default="both",
+                        help="формат отчёта (both = md + html)")
     parser.add_argument("-o", "--output", default=None, help="базовое имя файла отчёта")
     return parser
 
@@ -79,9 +84,9 @@ def print_findings(findings: list[Finding]) -> None:
     console.print(table)
 
 
-def default_wordlist() -> list[str]:
+def default_wordlist(name: str = "common.txt") -> list[str]:
     path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        "wordlists", "common.txt")
+                        "wordlists", name)
     if os.path.exists(path):
         with open(path, encoding="utf-8") as fh:
             return [line.strip() for line in fh if line.strip() and not line.startswith("#")]
@@ -94,6 +99,28 @@ async def run(args: argparse.Namespace) -> None:
     tech: list[str] = []
     port_lines: list[str] = []
     web_urls: list[str] = []
+    subs_found: list[str] = []
+    open_ports: list = []
+
+    if args.subs:
+        if is_domain(target.host):
+            with Progress(SpinnerColumn(), TextColumn("{task.description}"),
+                          console=console, transient=True) as progress:
+                task = progress.add_task("Перебираю субдомены...", total=None)
+                subs_found = await enum_subdomains(
+                    target.host, default_wordlist("subdomains.txt"), concurrency=50,
+                    progress=lambda done, total: progress.update(
+                        task, description=f"Перебираю субдомены... {done}/{total}"),
+                )
+            if subs_found:
+                table = Table(title=f"Живые субдомены {target.host} ({len(subs_found)})")
+                for i in range(0, len(subs_found), 3):
+                    table.add_row(*subs_found[i:i + 3])
+                console.print(table)
+            else:
+                console.print("[yellow]Субдомены из словаря не нашлись.[/yellow]")
+        else:
+            console.print("[yellow]--subs работает только для доменов, не для IP/localhost.[/yellow]")
 
     if target.is_web:
         web_urls.append(target.base_url)
@@ -129,6 +156,19 @@ async def run(args: argparse.Namespace) -> None:
             else:
                 console.print("[yellow]Открытых портов не найдено.[/yellow]")
 
+    # TLS-аудит: для https-цели или если найден открытый 443-й порт
+    tls_port = None
+    if target.scheme == "https":
+        tls_port = target.port
+    elif any(op.port == 443 for op in open_ports):
+        tls_port = 443
+    if tls_port and not args.no_web:
+        console.print(f"\n[bold blue]== TLS-аудит {target.host}:{tls_port} ==[/bold blue]")
+        for f in await check_tls(target.host, tls_port):
+            all_findings.append(f)
+            color = SEVERITY_COLORS.get(f.severity, "white")
+            console.print(f"  [{color}]{f.severity}[/{color}] {f.title}")
+
     if not args.no_web:
         for url in web_urls:
             console.print(f"\n[bold blue]== Веб-разведка {url} ==[/bold blue]")
@@ -161,13 +201,21 @@ async def run(args: argparse.Namespace) -> None:
     os.makedirs("reports", exist_ok=True)
     md_path = os.path.join("reports", base + ".md")
     html_path = os.path.join("reports", base + ".html")
+    json_path = os.path.join("reports", base + ".json")
+    saved: list[str] = []
     if args.format in ("md", "both"):
         with open(md_path, "w", encoding="utf-8") as fh:
-            fh.write(markdown_report(args.target, all_findings, tech, port_lines))
+            fh.write(markdown_report(args.target, all_findings, tech, port_lines, subs_found))
+        saved.append(f"reports/{base}.md")
     if args.format in ("html", "both"):
         with open(html_path, "w", encoding="utf-8") as fh:
-            fh.write(html_report(args.target, all_findings, tech, port_lines))
-    console.print(f"\n[green]Отчёт:[/green] reports/{base}.md и reports/{base}.html")
+            fh.write(html_report(args.target, all_findings, tech, port_lines, subs_found))
+        saved.append(f"reports/{base}.html")
+    if args.format == "json":
+        with open(json_path, "w", encoding="utf-8") as fh:
+            fh.write(json_report(args.target, all_findings, tech, port_lines, subs_found))
+        saved.append(f"reports/{base}.json")
+    console.print(f"\n[green]Отчёт:[/green] " + " и ".join(saved))
 
 
 def _load(path: str) -> list[str]:

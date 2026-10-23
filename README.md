@@ -13,11 +13,13 @@
 | Модуль | Что делает |
 |---|---|
 | **portscan** | Асинхронный TCP connect-скан портов (топ-80 по умолчанию, свои диапазоны, `full`) |
-| **banner** | Сбор баннеров сервисов + детект утечки версий |
-| **web** | Скан директорий по словарю, поиск `.git`, `.env`, бэкапов, `robots.txt`, `sitemap.xml` |
-| **fingerprint** | Определение стека технологий по заголовкам, кукам и контенту |
+| **banner** | Сбор баннеров сервисов на любом порту (протокол-агностично) + детект утечки версий |
+| **web** | Скан директорий по словарю, поиск `.git`, `.env`, бэкапов + парсер `robots.txt` (Disallow-пути добавляются в скан) |
+| **fingerprint** | Определение стека технологий по заголовкам, кукам, `<title>` и контенту |
 | **headers** | Аудит security-заголовков (CSP, HSTS, X-Frame-Options, HttpOnly…) |
-| **report** | Отчёты в Markdown и HTML с уровнями серьёзности находок |
+| **tls** | Аудит сертификата (срок, самоподписанность, верификация) и устаревших протоколов TLS 1.0/1.1 |
+| **subdomains** | Перебор субдоменов по словарю через DNS (`--subs`, только для доменов) |
+| **report** | Отчёты в Markdown, HTML и JSON с уровнями серьёзности находок |
 
 ## Быстрый старт
 
@@ -36,11 +38,14 @@ python main.py example.com
 # Только веб-разведка конкретного URL
 python main.py http://example.com --no-ports
 
+# С перебором субдоменов (DNS) и TLS-аудитом https-цели
+python main.py example.com --subs
+
 # Свой диапазон портов и словарь директорий
 python main.py example.com --ports 1-1024,8080 --wordlist wordlists/common.txt
 
-# Отчёт только в HTML
-python main.py example.com --format html -o my_report
+# Машинно-читаемый отчёт JSON (для пайплайнов)
+python main.py example.com --format json -o my_report
 ```
 
 Отчёты сохраняются в папку `reports/` (`.md` + `.html`).
@@ -91,19 +96,22 @@ reconhunter/
 │   ├── core.py              # цели, находки, парсинг портов
 │   ├── portscan.py          # асинхронный сканер портов
 │   ├── banner.py            # сбор баннеров
-│   ├── webscan.py           # директории и чувствительные файлы
+│   ├── webscan.py           # директории, чувствительные файлы, robots.txt
 │   ├── fingerprint.py       # определение технологий
 │   ├── headers_check.py     # аудит security-заголовков
-│   └── report.py            # Markdown/HTML отчёты
-├── wordlists/common.txt     # словарь директорий
+│   ├── tls_check.py         # аудит TLS: сертификат и протоколы
+│   ├── subdomains.py        # перебор субдоменов через DNS
+│   └── report.py            # Markdown/HTML/JSON отчёты
+├── wordlists/
+│   ├── common.txt           # словарь директорий
+│   └── subdomains.txt       # словарь субдоменов
 └── docker-compose.yml       # лаборатория Juice Shop
 ```
 
 ## Что дальше (TODO)
 
-- [ ] Поддержка субдоменов (перебор по словарю)
-- [ ] Проверка TLS (устаревшие протоколы и шифры)
-- [ ] Экспорт в JSON
+- [ ] Проверка поддоменов на живые HTTP-сервисы (скан найденных субдоменов)
+- [ ] Экспорт в SARIF
 - [ ] Скрин README на реальной лабе Juice Shop
 
 ## Лицензия

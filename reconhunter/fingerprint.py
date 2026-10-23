@@ -9,18 +9,18 @@ import aiohttp
 from .core import Finding
 from .webscan import USER_AGENT
 
-# (куки, технология)
+# (имя куки в нижнем регистре, технология) — сравнение точное, не по подстроке
 COOKIE_SIGNS = {
     "io": "Socket.IO (Node.js)",
     "connect.sid": "Express (Node.js)",
     "phpsessid": "PHP",
     "jsessionid": "Java / JSP",
-    "asp.net_sessions": "ASP.NET",
+    "asp.net_sessionid": "ASP.NET",
     "rack.session": "Ruby (Rack)",
     "laravel_session": "Laravel",
     "ci_session": "CodeIgniter",
     "csrftoken": "Django (вероятно)",
-    "wp-settings": "WordPress",
+    "wp-settings-time-1": "WordPress",
 }
 
 # (подстрока в контенте, технология)
@@ -50,7 +50,20 @@ async def fingerprint(base_url: str, timeout: float = 6.0) -> tuple[list[str], l
 
     server = headers.get("Server", "")
     powered = headers.get("X-Powered-By", "")
-    cookies = headers.get("Set-Cookie", "").lower()
+
+    # Точные имена кук вместо поиска подстрок — иначе "io" ловится в любой куке
+    cookie_names: set[str] = set()
+    for header in headers.getall("Set-Cookie", []):
+        first = header.split(";", 1)[0]
+        if "=" in first:
+            cookie_names.add(first.split("=", 1)[0].strip().lower())
+    for cookie_name, name in COOKIE_SIGNS.items():
+        if cookie_name in cookie_names:
+            tech.append(name)
+
+    title = re.search(r"<title[^>]*>(.*?)</title>", body, re.IGNORECASE | re.DOTALL)
+    if title:
+        tech.append(f"Title: {title.group(1).strip()[:80]}")
 
     if server:
         tech.append(f"Server: {server}")
@@ -67,10 +80,6 @@ async def fingerprint(base_url: str, timeout: float = 6.0) -> tuple[list[str], l
             title="Заголовок X-Powered-By раскрывает технологии",
             detail=powered,
         ))
-
-    for cookie_name, name in COOKIE_SIGNS.items():
-        if cookie_name in cookies:
-            tech.append(name)
 
     for needle, name in CONTENT_SIGNS:
         if needle in body:

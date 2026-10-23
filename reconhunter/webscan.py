@@ -28,8 +28,6 @@ SENSITIVE_PATHS = {
     "web.config": "MEDIUM",
     "composer.json": "LOW",
     "package.json": "INFO",
-    "robots.txt": "INFO",
-    "sitemap.xml": "INFO",
     "crossdomain.xml": "LOW",
     "admin": "INFO",
     "administrator": "INFO",
@@ -98,19 +96,44 @@ async def scan_web(
     concurrency: int = 40,
     progress=None,
 ) -> list[WebFinding]:
-    """Проверяет чувствительные пути + словарь директорий, возвращает находки."""
+    """Проверяет чувствительные пути + словарь директорий, возвращает находки.
+
+    Плюс: вычитывает Disallow-пути из robots.txt и добавляет их в скан —
+    robots.txt часто раскрывает скрытые панели."""
     findings: list[WebFinding] = []
     sem = asyncio.Semaphore(concurrency)
     done = 0
 
-    paths = list(SENSITIVE_PATHS)
-    if wordlist:
-        known = set(SENSITIVE_PATHS)
-        paths += [p.strip().lstrip("/") for p in wordlist
-                  if p.strip() and not p.startswith("#") and p.strip().lstrip("/") not in known]
-
     headers = {"User-Agent": USER_AGENT}
     async with aiohttp.ClientSession(headers=headers) as session:
+        robots_paths: list[str] = []
+        status, body = await fetch(session, f"{base_url}/robots.txt", timeout)
+        if status == 200:
+            for line in body.splitlines():
+                low = line.strip().lower()
+                if low.startswith("disallow:") or low.startswith("allow:"):
+                    path = line.split(":", 1)[1].strip().strip("/")
+                    if path and "*" not in path and len(path) < 40:
+                        robots_paths.append(path)
+
+        seen: set[str] = set(SENSITIVE_PATHS)
+        paths = list(SENSITIVE_PATHS)
+        if wordlist:
+            for p in wordlist:
+                p = p.strip().lstrip("/")
+                if p and not p.startswith("#") and p not in seen:
+                    seen.add(p)
+                    paths.append(p)
+        for p in robots_paths:
+            if p not in seen:
+                seen.add(p)
+                paths.append(p)
+
+        if robots_paths:
+            findings.append(WebFinding(
+                path="/robots.txt", status=200, severity="LOW",
+                note=f"раскрывает {len(robots_paths)} скрытых путей — они добавлены в скан",
+            ))
         async def worker(path: str) -> None:
             nonlocal done
             async with sem:
@@ -133,6 +156,7 @@ def findings_from_web(web_findings: list[WebFinding]) -> list[Finding]:
     out: list[Finding] = []
     for wf in web_findings:
         title = f"{wf.path} — {STATUS_LABELS.get(wf.status, str(wf.status))}"
+        detail = f"HTTP {wf.status}" + (f" · {wf.note}" if wf.note else "")
         out.append(Finding(module="web", severity=wf.severity,
-                           title=title, detail=f"HTTP {wf.status}"))
+                           title=title, detail=detail))
     return out
