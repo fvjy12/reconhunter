@@ -4,6 +4,7 @@
 
 > ⚠️ **Только для авторизованного тестирования:** собственные лаборатории, CTF, системы, владельцы которых дали явное разрешение. Сканирование чужих систем без разрешения — незаконно. Проект создан в образовательных целях.
 
+[![tests](https://github.com/fvjy12/reconhunter/actions/workflows/tests.yml/badge.svg)](https://github.com/fvjy12/reconhunter/actions/workflows/tests.yml)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Code style: black-compatible](https://img.shields.io/badge/code%20style-simple-black)](https://github.com/psf/black)
